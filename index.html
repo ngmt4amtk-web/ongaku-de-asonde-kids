@@ -1037,7 +1037,7 @@ function ctxInit(){
     var AC = window.AudioContext || window.webkitAudioContext;
     ac = new AC();
     master = ac.createGain();
-    master.gain.value = 0.80;
+    master.gain.value = 1.40;
     var comp = ac.createDynamicsCompressor();
     comp.threshold.value = -18;
     comp.knee.value = 24;
@@ -2065,7 +2065,7 @@ function renderSong(){
     var rate = 44100;
     var oc = new OfflineCtx(2, Math.ceil(rate * dur), rate);
 
-    var mGain = oc.createGain(); mGain.gain.value = 0.80;
+    var mGain = oc.createGain(); mGain.gain.value = 1.40;
     var comp = oc.createDynamicsCompressor();
     comp.threshold.value = -18; comp.knee.value = 24; comp.ratio.value = 6;
     comp.attack.value = 0.004; comp.release.value = 0.18;
