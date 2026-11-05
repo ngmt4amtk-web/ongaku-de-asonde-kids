@@ -150,6 +150,11 @@ h1{font-size:30px;letter-spacing:.02em}
   box-shadow:inset 0 0 0 2px rgba(120,110,160,.13);display:flex;align-items:center;justify-content:center;
   font-size:0;transition:background .12s ease}
 .cell.sep{box-shadow:inset 3px 0 0 #C9BFE0,inset 0 0 0 2px rgba(120,110,160,.13)}
+.cell.fit{background:var(--f);box-shadow:inset 0 0 0 2px var(--c),0 0 6px var(--c)}
+.cell.fit.sep:not(.now){box-shadow:inset 3px 0 0 #C9BFE0,inset 0 0 0 2px var(--c),0 0 6px var(--c)}
+.cell.locked{opacity:.32}
+.cell.nope{animation:cellNope .22s ease}
+@keyframes cellNope{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
 .cell.on{background:var(--c);box-shadow:inset 0 0 0 2px rgba(0,0,0,.08)}
 .cell.tail{background:var(--c);opacity:.62;border-radius:0;box-shadow:none;
   margin-left:-2px;width:calc(100% + 2px)}
@@ -282,7 +287,7 @@ body.adult .glabel b.adultOnly{display:block}
   <!-- ===== 3. メロディ ===== -->
   <section class="screen" id="s3">
     <h2>メロディを つくる</h2>
-    <p class="mini">よこは じかん、たては 音の たかさ。<ruby>拍<rt>はく</rt></ruby>は てびょうし <span style="white-space:nowrap">1かいぶん</span>。マスを おすと 音が はいるよ。</p>
+    <p class="mini">よこは じかん、たては 音の たかさ。<ruby>拍<rt>はく</rt></ruby>は てびょうし <span style="white-space:nowrap">1かいぶん</span>。マスを おすと 音が はいるよ。ひかる マスは いまの <ruby>和音<rt>わおん</rt></ruby>に あう 音だよ。</p>
 
     <div class="gridWrap" id="gridWrap">
       <div class="halfTabs hide" id="halfTabs">
@@ -292,6 +297,7 @@ body.adult .glabel b.adultOnly{display:block}
       <div class="grid" id="grid"></div>
     </div>
 
+    <button class="ghost fitLockBtn" id="fitLockBtn" aria-pressed="false" style="width:100%;margin-top:8px">✨ ひかる 音だけに する</button>
     <div class="lenRow" id="lenRow">
       <button data-len="1" class="on">🐜 みじかい<span class="sub">1ぱく</span></button>
       <button data-len="2">🐢 ながい<span class="sub">2ぱく</span></button>
@@ -925,6 +931,7 @@ var state = {
   notes: new Array(16).fill(null),  // {row,len} | {rest:true} | null
   half: 0,                 // 2へやずつ表示のときの前半/後半
   restMode: false,
+  fitLock: false,          // ひかる 音だけ モード（1・3ぱくめを しぼる）
   loop: false,
   lhMode: 'single',        // 'ひとつの音' | '和音'
   scoreHands: 'both',      // 'both' | 'rh' | 'lh'
@@ -1607,6 +1614,18 @@ function computeCover(){
   return cover;
 }
 
+// その 拍の 和音に 合う 音（構成音）か どうか
+function isFitRow(col, r){
+  var m = moodObj(state.mood || MOODS[0].id);
+  var ch = CH[state.chords[Math.floor(col / 4)]] || CH.C;
+  var pc = ((m.scale[7 - r] % 12) + 12) % 12;
+  return ch.notes.some(function(x){ return ((x % 12) + 12) % 12 === pc; });
+}
+// 「ひかる 音だけ」の ときに 置けない マスか どうか（1・3ぱくめだけ しぼる）
+function isLockedCell(col, r){
+  return state.fitLock && col % 2 === 0 && !isFitRow(col, r);
+}
+
 function renderMelody(){
   var grid = document.getElementById('grid');
   if(!grid) return;
@@ -1642,6 +1661,7 @@ function renderMelody(){
   for(var r = 0; r < 8; r++){
     var color = ROWCOLORS[r];
     var light = mixHex(color, 0.86);
+    var glow = mixHex(color, 0.65);
     // 矢印は 段ラベルの 中でも ドレミとは 別の 行に 置く（いちばん上・下の 段も ドレミを 出せる）
     var lab = '<div class="glabel">';
     if(r === 0) lab += '<span class="arwRow"><span class="arw">↑</span><span class="arwt">たかい</span></span>';
@@ -1668,11 +1688,16 @@ function renderMelody(){
         var nextIsTail = (col + 1 < 16) && cover[col + 1] && cover[col + 1][r] === 'tail';
         if(!nextIsTail) cls += ' tailEnd';
       }
+      var empty = !st && !isRest;
+      var fit = isFitRow(col, r);
+      if(empty && fit) cls += ' fit';
+      if(empty && isLockedCell(col, r)) cls += ' locked';
       if(isRest && r === 4) inner = '<span class="moon">🌙</span>';
       var albl = (Math.floor(col / 4) + 1) + 'つめの へや ' + (col % 4 + 1) + 'ぱくめ、下から ' +
                  (8 - r) + 'ばんめの 音';
+      if(empty && fit) albl += '、ひかる 音';
       html += '<button type="button" class="' + cls + '" data-col="' + col + '" data-row="' + r +
-              '" aria-label="' + albl + '" style="--c:' + color + ';--l:' + light + '">' + inner + '</button>';
+              '" aria-label="' + albl + '" style="--c:' + color + ';--l:' + light + ';--f:' + glow + '">' + inner + '</button>';
     }
   }
   grid.innerHTML = html;
@@ -1724,6 +1749,12 @@ function onCellTap(c, r){
     afterNoteChange();
     return;
   }
+  if(isLockedCell(c, r)){
+    flashHint('✨ ひかる マスを えらんでね');
+    var nb = document.querySelector('.cell[data-col="' + c + '"][data-row="' + r + '"]');
+    if(nb){ nb.classList.remove('nope'); void nb.offsetWidth; nb.classList.add('nope'); }
+    return;
+  }
   pushHistory('notes');
   var len = (state.mode === 'jikkuri') ? state.noteLen : 1;
   placeNote(c, r, len);
@@ -1759,6 +1790,16 @@ document.querySelectorAll('.lenRow button').forEach(function(b){
     state.noteLen = parseInt(b.dataset.len, 10);
     syncLenRow();
   });
+});
+
+/* ---- ひかる 音だけ ---- */
+document.getElementById('fitLockBtn').addEventListener('click', function(){
+  state.fitLock = !state.fitLock;
+  this.classList.toggle('on', state.fitLock);
+  this.setAttribute('aria-pressed', state.fitLock ? 'true' : 'false');
+  this.textContent = state.fitLock ? '✨ ひかる 音だけ（1・3ぱくめ）' : '✨ ひかる 音だけに する';
+  this.style.background = state.fitLock ? '#FFE9A8' : '';
+  renderMelody();
 });
 
 /* ---- やすみ ---- */
@@ -1832,7 +1873,7 @@ function autoMelody(){
       var beat = bar * 4 + pat[pi];
       if(beat >= 16) continue;
       var row;
-      if(pat[pi] === 3 || Math.random() < 0.55){
+      if(pat[pi] === 3 || (state.fitLock && beat % 2 === 0) || Math.random() < 0.55){
         row = goodRows[Math.floor(Math.random() * Math.min(3, goodRows.length))];
       } else {
         row = Math.floor(Math.random() * 8);
