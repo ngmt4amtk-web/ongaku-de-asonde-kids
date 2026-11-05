@@ -205,6 +205,7 @@ body.adult .glabel b.adultOnly{display:block}
 @keyframes flash{0%{background:#FFF3C4}}
 #scorePanel.hide{display:none}
 #scorePanel .btnRow>*{flex:1 1 40%}
+#scorePanel .btnRow.three>*{flex:1 1 28%;font-size:20px;padding:12px 4px}
 </style>
 </head>
 <body>
@@ -344,11 +345,18 @@ body.adult .glabel b.adultOnly{display:block}
 
     <button class="big ghost" id="scoreOpen" style="margin-top:10px">🎼 がくふに する</button>
     <div id="scorePanel" class="hide" style="margin-top:10px">
-      <p class="hint" style="text-align:center">ひだりての ひきかた</p>
-      <div class="btnRow">
+      <p class="hint" style="text-align:center">どっちの 手</p>
+      <div class="btnRow three">
+        <button class="modeBtn on" id="handBoth">りょうて</button>
+        <button class="modeBtn" id="handR">みぎて</button>
+        <button class="modeBtn" id="handL">ひだりて</button>
+      </div>
+      <p class="hint" id="lhHead" style="text-align:center">ひだりての ひきかた</p>
+      <div class="btnRow" id="lhBtns">
         <button class="modeBtn on" id="lhSingle">ひとつの 音</button>
         <button class="modeBtn" id="lhChord"><ruby>和音<rt>わおん</rt></ruby></button>
       </div>
+      <button class="switchBtn" id="kanaBtn" style="margin-top:10px;width:100%">ドレミの よみかた</button>
       <canvas id="scoreCv" width="1240" height="1754" aria-label="がくふ" style="width:100%;height:auto;display:block;background:#fff;border-radius:12px;margin-top:10px"></canvas>
       <button class="big blue" id="scoreSave" style="margin-top:10px">🎼 がくふを ほぞん</button>
       <p class="hint" id="scoreMsg" style="text-align:center"></p>
@@ -919,6 +927,8 @@ var state = {
   restMode: false,
   loop: false,
   lhMode: 'single',        // 'ひとつの音' | '和音'
+  scoreHands: 'both',      // 'both' | 'rh' | 'lh'
+  scoreKana: true,         // ドレミの よみかた
   seq: 0,                  // 曲の通し番号
   history: { chords: [], notes: [] }   // undo用（画面ごとに 分ける・各50）
 };
@@ -2327,6 +2337,16 @@ function scoreRestEvent(beat, len){
            tieNext: false, tiePrev: false, stemUp: true };
 }
 
+/* 音の よみかた（ドレミ＋臨時記号）。文字番号 0-6 は C D E F G A B */
+var SCORE_KANA_NAMES = ['ド', 'レ', 'ミ', 'ファ', 'ソ', 'ラ', 'シ'];
+function scoreKana(key){
+  if(!key){ return ''; }
+  var s = SCORE_KANA_NAMES[key.letter] || '';
+  if(key.alter > 0){ s += '♯'; }
+  else if(key.alter < 0){ s += '♭'; }
+  return s;
+}
+
 /* ---- 曲 → 楽譜のモデル ---- */
 function buildScoreModel(song, lhMode){
   var mode = (lhMode === 'chord') ? 'chord' : 'single';
@@ -2410,12 +2430,22 @@ function buildScoreModel(song, lhMode){
     var ch = CH[chords[b]] || CH.C;
     var pitches = [];
     if(mode === 'chord'){
-      pitches = ch.notes.slice();
-      var guard = 0;
-      while(pitches.length && Math.max.apply(null, pitches) > 60 && guard < 8){
-        for(k = 0; k < pitches.length; k++){ pitches[k] -= 12; }
-        guard++;
+      /* 根音を ファ〜ミ（41〜52）の あいだに おさめ、そこからの 音の へだたりで 基本形を つくる */
+      var root = ch.bass;
+      var rootGuard = 0;
+      while(root < 41 && rootGuard < 8){ root += 12; rootGuard++; }
+      rootGuard = 0;
+      while(root > 52 && rootGuard < 8){ root -= 12; rootGuard++; }
+      var ivs = [], seenIV = {};
+      for(k = 0; k < ch.notes.length; k++){
+        var iv = ((ch.notes[k] - root) % 12 + 12) % 12;
+        if(seenIV[iv]){ continue; }
+        seenIV[iv] = true;
+        ivs.push(iv);
       }
+      if(!seenIV[0]){ ivs.push(0); }
+      ivs.sort(function(x, y){ return x - y; });
+      for(k = 0; k < ivs.length; k++){ pitches.push(root + ivs[k]); }
     } else {
       pitches = [ch.bass];
     }
@@ -2480,8 +2510,13 @@ function drawScore(ctx, W, H, model, meta){
   meta = meta || {};
   var sp = W / 60;
   var FONT = meta.fontFamily || 'sans-serif';
-  var INK = '#000';
+  var INK = '#3b3552';
   var GREY = '#8a8a8a';
+  var STAFF = '#B8B2CC';
+  var hands = (meta.hands === 'rh' || meta.hands === 'lh') ? meta.hands : 'both';
+  var kanaOn = meta.kana === true;
+  var faceOn = meta.face === true;
+  var NOTE_COLORS = ['#FF8A7A', '#FFA94D', '#FFD43B', '#8CE99A', '#66D9E8', '#74C0FC', '#C77DFF'];
   var bars = (model && model.bars) ? model.bars : [];
 
   function sy(firstY, pos){ return firstY - pos * sp * 0.5; }
@@ -2490,12 +2525,14 @@ function drawScore(ctx, W, H, model, meta){
     scoreFillGlyph(ctx, name, x, y, (sx === undefined ? 1 : sx) * sp,
                    (sy2 === undefined ? 1 : sy2) * sp, color || INK);
   }
-  function line(x1, y1, x2, y2, w){
+  function line(x1, y1, x2, y2, w, color){
+    ctx.strokeStyle = color || INK;
     ctx.lineWidth = w;
     ctx.beginPath();
     ctx.moveTo(x1, y1);
     ctx.lineTo(x2, y2);
     ctx.stroke();
+    ctx.strokeStyle = INK;
   }
 
   ctx.save();
@@ -2535,8 +2572,107 @@ function drawScore(ctx, W, H, model, meta){
   var gapStaff = 10 * sp;
   var gapSys = 15 * sp;
   var headerW = [7.6 * sp, 4.8 * sp];
-  var sysTop = [15 * sp, 15 * sp + 8 * sp + gapStaff + gapSys];
+  var sysTop;
+  if(hands === 'both'){
+    sysTop = [15 * sp, 15 * sp + 8 * sp + gapStaff + gapSys];
+  } else {
+    /* 片手の時は 1段に 五線1本。第5線 15sp、第1線から 次の第5線まで 20sp */
+    sysTop = [15 * sp, 15 * sp + 4 * sp + 20 * sp];
+  }
   var tieLists = { rh: [], lh: [] };
+
+  /* 符頭の 中心と はんけい */
+  function headCX(x, ev){ return x + ((ev && ev.len >= 4) ? 0.84 : 0.59) * sp; }
+  function headRX(ev){
+    if(ev && ev.keys && ev.keys.length > 1){ return 0.74 * sp; }
+    return ((ev && ev.len >= 4) ? 1.10 : 0.88) * sp;
+  }
+  function headRY(ev){ return ((ev && ev.keys && ev.keys.length > 1) ? 0.55 : 0.78) * sp; }
+
+  /* 符頭（なかが 白い音符は 白い だ円を かさねる） */
+  function drawHead(cx, cy, rx, ry, color, filled){
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 0.09 * sp;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    if(!filled){
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, Math.max(rx - 0.25 * sp, 0.1 * sp), Math.max(ry - 0.22 * sp, 0.1 * sp),
+                  0, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
+    if(faceOn){
+      var f = ry / (0.62 * sp);
+      ctx.fillStyle = 'rgba(255,110,140,.55)';
+      ctx.beginPath();
+      ctx.arc(cx - 0.37 * sp * f, cy + 0.10 * sp * f, 0.10 * sp * f, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 0.37 * sp * f, cy + 0.10 * sp * f, 0.10 * sp * f, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.arc(cx - 0.22 * sp * f, cy - 0.08 * sp * f, 0.09 * sp * f, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx + 0.22 * sp * f, cy - 0.08 * sp * f, 0.09 * sp * f, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx, cy + 0.02 * sp * f, 0.16 * sp * f, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.lineWidth = 0.07 * sp * f;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = INK;
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+    }
+  }
+
+  /* 左手の よみかた（根音を 丸で かこむ） */
+  function drawLhKana(keys, cx0, ky){
+    if(!keys || !keys.length){ return; }
+    ctx.font = '700 ' + (1.5 * sp).toFixed(2) + 'px ' + FONT;
+    var root = scoreKana(keys[0]);
+    var restStr = '';
+    for(var i = 1; i < keys.length; i++){ restStr += scoreKana(keys[i]); }
+    var ringRX = ctx.measureText(root).width / 2 + 0.55 * sp;
+
+    ctx.strokeStyle = '#FF6B6B';
+    ctx.lineWidth = 0.16 * sp;
+    ctx.beginPath();
+    ctx.ellipse(cx0, ky, ringRX, 1.08 * sp, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = INK;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText(root, cx0, ky);
+    if(restStr){
+      ctx.textAlign = 'left';
+      ctx.fillText(restStr, cx0 + ringRX + 0.35 * sp, ky);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  /* 読みの行の 高さ（五線の第1線から 下へ）。音符や 符幹に ぶつからない ところまで 下げる */
+  function kanaRowOffset(s, part, minOff, pad){
+    var low = 0;
+    for(var b = s * 2; b < s * 2 + 2 && b < bars.length; b++){
+      var list = bars[b][part];
+      for(var e = 0; e < list.length; e++){
+        var ev = list[e];
+        if(ev.rest){ continue; }
+        for(var k = 0; k < ev.keys.length; k++){
+          var pos = ev.keys[k].pos;
+          low = Math.max(low, -pos * 0.5 + headRY(ev) / sp);
+          if(!ev.stemUp && ev.len < 4){ low = Math.max(low, (7 - pos) * 0.5); }
+        }
+      }
+    }
+    return Math.max(minOff, low + pad) * sp;
+  }
 
   /* 音符を置く */
     function drawEvent(ev, clef, firstY, x, sysIdx){
@@ -2553,29 +2689,39 @@ function drawScore(ctx, W, H, model, meta){
       var i, k;
       for(i = 0; i < keys.length; i++){ keys[i].yy = sy(firstY, keys[i].pos); }
 
+      /* 低い音から順に 描く */
+      var hs = keys.slice().sort(function(a, b){ return a.pos - b.pos; });
+
+      var whole = (ev.len >= 4);
+      var filled = (ev.len < 2);
+      var hcx = headCX(x, ev);
+      var hrx = headRX(ev);
+      var hry = headRY(ev);
+      var hx1 = hcx - hrx - 0.3 * sp;   /* 加線の はし（左右に 0.3sp はみだす） */
+      var hx2 = hcx + hrx + 0.3 * sp;
+
       /* 加線 */
       var drawn = {};
-      var ledgerHead = (ev.len >= 4) ? 1.688 : 1.18;   /* 全音符は 符頭が 広い */
-      for(i = 0; i < keys.length; i++){
-        var kp = keys[i].pos;
+      for(i = 0; i < hs.length; i++){
+        var kp = hs[i].pos;
         if(kp <= -2){
           for(k = -2; k >= kp; k -= 2){
             if(drawn[k]){ continue; }
             drawn[k] = true;
-            line(x - 0.4 * sp, sy(firstY, k), x + (ledgerHead + 0.4) * sp, sy(firstY, k), 0.16 * sp);
+            line(hx1, sy(firstY, k), hx2, sy(firstY, k), 0.16 * sp);
           }
         } else if(kp >= 10){
           for(k = 10; k <= kp; k += 2){
             if(drawn[k]){ continue; }
             drawn[k] = true;
-            line(x - 0.4 * sp, sy(firstY, k), x + (ledgerHead + 0.4) * sp, sy(firstY, k), 0.16 * sp);
+            line(hx1, sy(firstY, k), hx2, sy(firstY, k), 0.16 * sp);
           }
         }
       }
 
       /* 臨時記号（高い音から順に、近い音は左へずらす） */
       var accs = [];
-      for(i = 0; i < keys.length; i++){ if(keys[i].acc){ accs.push(keys[i]); } }
+      for(i = 0; i < hs.length; i++){ if(hs[i].acc){ accs.push(hs[i]); } }
       accs.sort(function(a, b){ return b.pos - a.pos; });
       var shift = 0, lastPos = null;
       for(i = 0; i < accs.length; i++){
@@ -2583,54 +2729,74 @@ function drawScore(ctx, W, H, model, meta){
         if(lastPos !== null && (lastPos - kk.pos) < 6){ shift += 1.5; }
         lastPos = kk.pos;
         g(kk.acc,
-          x - 0.4 * sp - shift * sp - scoreGlyphAdv(kk.acc) * sp,
+          hcx - hrx - 0.3 * sp - shift * sp - scoreGlyphAdv(kk.acc) * sp,
           sy(firstY, kk.pos), 1, 1, INK);
       }
 
+      /* 符幹（符頭より 先に 描く） */
+      if(!whole){
+        var yLow = hs[0].yy;                    /* 画面では 下 */
+        var yHigh = hs[hs.length - 1].yy;       /* 画面では 上 */
+        var midY = sy(firstY, 4);
+        ctx.strokeStyle = INK;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 0.16 * sp;
+        if(ev.stemUp){
+          var sxa = hcx + hrx - 0.05 * sp;
+          var yBa = yLow;
+          var yTa = yHigh - 3.5 * sp;
+          if(yTa > midY){ yTa = midY; }
+          ctx.beginPath();
+          ctx.moveTo(sxa, yBa);
+          ctx.lineTo(sxa, yTa);
+          ctx.stroke();
+        } else {
+          var sxb = hcx - hrx + 0.05 * sp;
+          var yTb = yHigh;
+          var yBb = yLow + 3.5 * sp;
+          if(yBb < midY){ yBb = midY; }
+          ctx.beginPath();
+          ctx.moveTo(sxb, yTb);
+          ctx.lineTo(sxb, yBb);
+          ctx.stroke();
+        }
+        ctx.lineCap = 'butt';
+      }
+
       /* 符頭 */
-      var headName = (ev.len >= 4) ? 'noteWhole' : ((ev.len >= 2) ? 'noteHalf' : 'noteBlack');
-      var headW = (headName === 'noteWhole') ? 1.688 : 1.18;
-      for(i = 0; i < keys.length; i++){
-        g(headName, x, keys[i].yy, 1, 1, INK);
+      for(i = 0; i < hs.length; i++){
+        drawHead(hcx, hs[i].yy, hrx, hry,
+                 NOTE_COLORS[hs[i].letter] || '#FFD43B', filled);
       }
 
       /* 付点 */
       if(ev.dot){
-        for(i = 0; i < keys.length; i++){
-          var dy = keys[i].yy;
-          if((((keys[i].pos % 2) + 2) % 2) === 0){ dy -= sp * 0.5; }
+        for(i = 0; i < hs.length; i++){
+          var dy = hs[i].yy;
+          if((((hs[i].pos % 2) + 2) % 2) === 0){ dy -= sp * 0.5; }
           ctx.beginPath();
-          ctx.arc(x + headW * sp + 0.5 * sp, dy, 0.2 * sp, 0, Math.PI * 2);
+          ctx.arc(hcx + hrx + 0.5 * sp, dy, 0.2 * sp, 0, Math.PI * 2);
           ctx.fillStyle = INK;
           ctx.fill();
         }
       }
 
-      /* 符幹 */
-      if(headName !== 'noteWhole'){
-        var lowPos = keys[0].pos, highPos = keys[0].pos;
-        for(i = 1; i < keys.length; i++){
-          if(keys[i].pos < lowPos){ lowPos = keys[i].pos; }
-          if(keys[i].pos > highPos){ highPos = keys[i].pos; }
-        }
-        var yLow = sy(firstY, lowPos);      /* 画面では下 */
-        var yHigh = sy(firstY, highPos);    /* 画面では上 */
-        var midY = sy(firstY, 4);
-        var stemW = 0.12 * sp;
-        if(ev.stemUp){
-          var sxa = x + headW * sp - stemW;
-          var yBa = yLow - 0.168 * sp;
-          var yTa = yHigh - 0.168 * sp - 3.5 * sp;
-          if(yTa > midY){ yTa = midY; }
-          ctx.fillStyle = INK;
-          ctx.fillRect(sxa, yTa, stemW, yBa - yTa);
+      /* よみかた */
+      if(kanaOn){
+        if(clef === 'treble'){
+          if(!ev.tiePrev){
+            ctx.font = '700 ' + (1.5 * sp).toFixed(2) + 'px ' + FONT;
+            ctx.fillStyle = INK;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(scoreKana(hs[0]), hcx, firstY + kanaRowOffset(sysIdx, 'rh', 2.6, 1.25));
+            ctx.textAlign = 'left';
+          }
         } else {
-          var sxb = x;
-          var yTb = yHigh + 0.168 * sp;
-          var yBb = yLow + 0.168 * sp + 3.5 * sp;
-          if(yBb < midY){ yBb = midY; }
-          ctx.fillStyle = INK;
-          ctx.fillRect(sxb, yTb, stemW, yBb - yTb);
+          /* 和音は 小節に1回（同じ和音が 2つ ならぶので）。ひとつの音は 音ごとに */
+          if(hs.length === 1 || ev.beat === 0){
+            drawLhKana(hs, hcx, firstY + kanaRowOffset(sysIdx, 'lh', 3.2, 1.55));
+          }
         }
       }
 
@@ -2644,34 +2810,42 @@ function drawScore(ctx, W, H, model, meta){
 
 
   for(var s = 0; s < 2; s++){
-    var tFirst = sysTop[s] + 4 * sp;
-    var bFirst = tFirst + gapStaff + 4 * sp;
+    var tFirst = (hands === 'lh') ? null : sysTop[s] + 4 * sp;
+    var bFirst = (hands === 'rh') ? null : ((hands === 'both') ? tFirst + gapStaff + 4 * sp : sysTop[s] + 4 * sp);
+    var oneFirst = (hands === 'rh') ? tFirst : bFirst;   /* 1本だけの時 */
 
     /* 五線 */
     for(var p = 0; p <= 8; p += 2){
-      line(leftX, sy(tFirst, p), rightX, sy(tFirst, p), 0.13 * sp);
-      line(leftX, sy(bFirst, p), rightX, sy(bFirst, p), 0.13 * sp);
+      if(tFirst !== null){ line(leftX, sy(tFirst, p), rightX, sy(tFirst, p), 0.12 * sp, STAFF); }
+      if(bFirst !== null){ line(leftX, sy(bFirst, p), rightX, sy(bFirst, p), 0.12 * sp, STAFF); }
     }
 
     /* 左端の縦線と括弧 */
-    line(leftX, sy(tFirst, 8), leftX, sy(bFirst, 0), 0.16 * sp);
-    var bracePath = SCORE_GLYPHS.brace;
-    var braceTop = 3.988;                     /* bBox の高さ（間） */
-    var braceH = sy(bFirst, 0) - sy(tFirst, 8);
-    g('brace', leftX - 1.5 * sp, sy(bFirst, 0), 3.6, (braceH / sp) / braceTop, INK);
+    if(hands === 'both'){
+      line(leftX, sy(tFirst, 8), leftX, sy(bFirst, 0), 0.16 * sp);
+      var braceTop = 3.988;                     /* bBox の高さ（間） */
+      var braceH = sy(bFirst, 0) - sy(tFirst, 8);
+      g('brace', leftX - 1.5 * sp, sy(bFirst, 0), 3.6, (braceH / sp) / braceTop, INK);
+    } else {
+      line(leftX, sy(oneFirst, 8), leftX, sy(oneFirst, 0), 0.16 * sp);
+    }
 
     /* 音部記号 */
-    g('gClef', leftX + 0.8 * sp, sy(tFirst, 2), 1, 1, INK);
-    g('fClef', leftX + 0.8 * sp, sy(bFirst, 6), 1, 1, INK);
+    if(tFirst !== null){ g('gClef', leftX + 0.8 * sp, sy(tFirst, 2), 1, 1, INK); }
+    if(bFirst !== null){ g('fClef', leftX + 0.8 * sp, sy(bFirst, 6), 1, 1, INK); }
 
-    /* 拍子（第1段だけ・両方の五線に） */
+    /* 拍子（第1段だけ・その手の五線に） */
     if(s === 0){
       var sigX = leftX + 4.6 * sp;
-      /* 上は pos6、下は pos2 を中心に、両方の五線へ */
-      g('time4', sigX, sy(tFirst, 6), 1, 1, INK);
-      g('time4', sigX, sy(tFirst, 2), 1, 1, INK);
-      g('time4', sigX, sy(bFirst, 6), 1, 1, INK);
-      g('time4', sigX, sy(bFirst, 2), 1, 1, INK);
+      /* 上は pos6、下は pos2 を中心に、五線へ */
+      if(tFirst !== null){
+        g('time4', sigX, sy(tFirst, 6), 1, 1, INK);
+        g('time4', sigX, sy(tFirst, 2), 1, 1, INK);
+      }
+      if(bFirst !== null){
+        g('time4', sigX, sy(bFirst, 6), 1, 1, INK);
+        g('time4', sigX, sy(bFirst, 2), 1, 1, INK);
+      }
     }
 
     /* ラベル */
@@ -2679,8 +2853,8 @@ function drawScore(ctx, W, H, model, meta){
     ctx.font = '400 ' + (1.3 * sp).toFixed(2) + 'px ' + FONT;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('みぎて', leftX + 0.2 * sp, sy(tFirst, 8) - 1.2 * sp);
-    ctx.fillText('ひだりて', leftX + 0.2 * sp, sy(bFirst, 8) - 1.2 * sp);
+    if(tFirst !== null){ ctx.fillText('みぎて', leftX + 0.2 * sp, sy(tFirst, 8) - 1.2 * sp); }
+    if(bFirst !== null){ ctx.fillText('ひだりて', leftX + 0.2 * sp, sy(bFirst, 8) - 1.2 * sp); }
     ctx.fillStyle = INK;
     ctx.textBaseline = 'middle';
 
@@ -2697,24 +2871,31 @@ function drawScore(ctx, W, H, model, meta){
       var bar = bars[barIdx] || { rh: [], lh: [] };
 
       var rhList = bar.rh || [];
-      for(var e1 = 0; e1 < rhList.length; e1++){
-        var ev1 = rhList[e1];
-        var x1 = mx + padL + ev1.beat * beatW;
-        if(ev1.rest && ev1.len >= 4){ x1 = mx + mw / 2 - scoreGlyphAdv('restWhole') * sp / 2; }
-        drawEvent(ev1, 'treble', tFirst, x1, s);
+      if(tFirst !== null){
+        for(var e1 = 0; e1 < rhList.length; e1++){
+          var ev1 = rhList[e1];
+          var x1 = mx + padL + ev1.beat * beatW;
+          if(ev1.rest && ev1.len >= 4){ x1 = mx + mw / 2 - scoreGlyphAdv('restWhole') * sp / 2; }
+          drawEvent(ev1, 'treble', tFirst, x1, s);
+        }
       }
       var lhList = bar.lh || [];
-      for(var e2 = 0; e2 < lhList.length; e2++){
-        drawEvent(lhList[e2], 'bass', bFirst, mx + padL + lhList[e2].beat * beatW, s);
+      if(bFirst !== null){
+        for(var e2 = 0; e2 < lhList.length; e2++){
+          drawEvent(lhList[e2], 'bass', bFirst, mx + padL + lhList[e2].beat * beatW, s);
+        }
       }
 
       /* 小節線 */
       var bx = mx + mw;
+      var yTop, yBot;
+      if(hands === 'both'){ yTop = sy(tFirst, 8); yBot = sy(bFirst, 0); }
+      else { yTop = sy(oneFirst, 8); yBot = sy(oneFirst, 0); }
       if(barIdx === 3){
-        line(bx - 0.9 * sp, sy(tFirst, 8), bx - 0.9 * sp, sy(bFirst, 0), 0.16 * sp);
-        line(bx - 0.25 * sp, sy(tFirst, 8), bx - 0.25 * sp, sy(bFirst, 0), 0.5 * sp);
+        line(bx - 0.9 * sp, yTop, bx - 0.9 * sp, yBot, 0.16 * sp);
+        line(bx - 0.25 * sp, yTop, bx - 0.25 * sp, yBot, 0.5 * sp);
       } else {
-        line(bx, sy(tFirst, 8), bx, sy(bFirst, 0), 0.16 * sp);
+        line(bx, yTop, bx, yBot, 0.16 * sp);
       }
     }
   }
@@ -2745,16 +2926,17 @@ function drawScore(ctx, W, H, model, meta){
       if(!bEvent){ continue; }
       var posA = a.ev.keys[0].pos;
       var posB = bEvent.ev.keys[0].pos;
-      var ya = (a.firstY - posA * sp * 0.5) + (a.ev.stemUp ? 0.62 * sp : -0.62 * sp);
-      var yb = (bEvent.firstY - posB * sp * 0.5) + (bEvent.ev.stemUp ? 0.62 * sp : -0.62 * sp);
+      var ya = (a.firstY - posA * sp * 0.5) + (a.ev.stemUp ? 1 : -1) * (headRY(a.ev) + 0.06 * sp);
+      var yb = (bEvent.firstY - posB * sp * 0.5) + (bEvent.ev.stemUp ? 1 : -1) * (headRY(bEvent.ev) + 0.06 * sp);
       var below = !!a.ev.stemUp;
-      var tieHead = (a.ev.len >= 4) ? 1.688 : 1.18;
-      var tieX = a.x + (tieHead + (a.ev.dot ? 0.95 : 0.35)) * sp;   /* 付点の 右から */
+      var tieCX = a.x + ((a.ev.len >= 4) ? 0.84 : 0.59) * sp;
+      var tieRX = ((a.ev.len >= 4) ? 0.95 : 0.70) * sp;
+      var tieX = tieCX + tieRX + (a.ev.dot ? 0.7 : 0.25) * sp;   /* 符頭の 右端＋0.25sp（付点が あれば その 右） */
       if(a.sys === bEvent.sys){
-        drawTie(tieX, ya, bEvent.x - 0.22 * sp, yb, below);
+        drawTie(tieX, ya, bEvent.x - 0.42 * sp, yb, below);
       } else {
         drawTie(tieX, ya, rightX - 0.3 * sp, ya, below);
-        drawTie(leftX + headerW[1] + 0.25 * sp, yb, bEvent.x - 0.22 * sp, yb, below);
+        drawTie(leftX + headerW[1] + 0.25 * sp, yb, bEvent.x - 0.42 * sp, yb, below);
       }
     }
   }
@@ -2838,6 +3020,7 @@ function jpegToPdf(jpegBytes, pxW, pxH){
 
 /* ---- がくふの画面づくり（DOM と state を触るのはここから下） ---- */
 var SCORE_FONT = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",sans-serif';
+var SCORE_FACE = true;   /* 顔つきの音符（画面と PDF で 同じ） */
 var scorePanelEl = document.getElementById('scorePanel');
 var scoreCvEl = document.getElementById('scoreCv');
 var scoreMsgEl = document.getElementById('scoreMsg');
@@ -2845,6 +3028,12 @@ var scoreOpenEl = document.getElementById('scoreOpen');
 var scoreSaveEl = document.getElementById('scoreSave');
 var lhSingleEl = document.getElementById('lhSingle');
 var lhChordEl = document.getElementById('lhChord');
+var lhHeadEl = document.getElementById('lhHead');
+var lhBtnsEl = document.getElementById('lhBtns');
+var handBothEl = document.getElementById('handBoth');
+var handREl = document.getElementById('handR');
+var handLEl = document.getElementById('handL');
+var kanaBtnEl = document.getElementById('kanaBtn');
 
 function scoreIsOpen(){ return !scorePanelEl.classList.contains('hide'); }
 
@@ -2862,12 +3051,28 @@ function drawScoreNow(){
   var c2 = scoreCvEl.getContext('2d');
   if(!c2){ return; }
   drawScore(c2, scoreCvEl.width, scoreCvEl.height, scoreModelNow(),
-    { title: scoreTitleText(), bpm: state.tempo, fontFamily: SCORE_FONT });
+    { title: scoreTitleText(), bpm: state.tempo, fontFamily: SCORE_FONT,
+      hands: state.scoreHands || 'both', kana: state.scoreKana !== false, face: SCORE_FACE });
 }
 
 function syncLh(){
   lhSingleEl.classList.toggle('on', (state.lhMode || 'single') === 'single');
   lhChordEl.classList.toggle('on', state.lhMode === 'chord');
+}
+
+function syncHands(){
+  var h = state.scoreHands || 'both';
+  handBothEl.classList.toggle('on', h === 'both');
+  handREl.classList.toggle('on', h === 'rh');
+  handLEl.classList.toggle('on', h === 'lh');
+  /* みぎてだけ の時は 左手の えらびを かくす */
+  var showLh = (h !== 'rh');
+  lhHeadEl.style.display = showLh ? '' : 'none';
+  lhBtnsEl.style.display = showLh ? '' : 'none';
+}
+
+function syncKana(){
+  kanaBtnEl.classList.toggle('on', state.scoreKana !== false);
 }
 
 scoreOpenEl.addEventListener('click', function(){
@@ -2877,7 +3082,30 @@ scoreOpenEl.addEventListener('click', function(){
   }
   scorePanelEl.classList.remove('hide');
   syncLh();
+  syncHands();
+  syncKana();
   drawScoreNow();
+});
+
+handBothEl.addEventListener('click', function(){
+  state.scoreHands = 'both';
+  syncHands();
+  if(scoreIsOpen()){ drawScoreNow(); }
+});
+handREl.addEventListener('click', function(){
+  state.scoreHands = 'rh';
+  syncHands();
+  if(scoreIsOpen()){ drawScoreNow(); }
+});
+handLEl.addEventListener('click', function(){
+  state.scoreHands = 'lh';
+  syncHands();
+  if(scoreIsOpen()){ drawScoreNow(); }
+});
+kanaBtnEl.addEventListener('click', function(){
+  state.scoreKana = (state.scoreKana === false);
+  syncKana();
+  if(scoreIsOpen()){ drawScoreNow(); }
 });
 
 lhSingleEl.addEventListener('click', function(){
@@ -2914,7 +3142,8 @@ scoreSaveEl.addEventListener('click', function(){
       var c3 = off.getContext('2d');
       if(!c3){ throw new Error('no 2d context'); }
       drawScore(c3, off.width, off.height, scoreModelNow(),
-        { title: scoreTitleText(), bpm: state.tempo, fontFamily: SCORE_FONT });
+        { title: scoreTitleText(), bpm: state.tempo, fontFamily: SCORE_FONT,
+          hands: state.scoreHands || 'both', kana: state.scoreKana !== false, face: SCORE_FACE });
       var dataUrl = off.toDataURL('image/jpeg', 0.92);
       var b64 = String(dataUrl).split(',')[1] || '';
       var bin = atob(b64);
