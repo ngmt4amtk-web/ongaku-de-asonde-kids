@@ -931,7 +931,7 @@ var state = {
   notes: new Array(16).fill(null),  // {row,len} | {rest:true} | null
   half: 0,                 // 2へやずつ表示のときの前半/後半
   restMode: false,
-  fitLock: false,          // ひかる 音だけ モード（1・3ぱくめを しぼる）
+  fitLock: false,          // ひかる 音だけ モード（かんたんは 1・3ぱくめ、じっくりは 1ぱくめを しぼる）
   loop: false,
   lhMode: 'single',        // 'ひとつの音' | '和音'
   scoreHands: 'both',      // 'both' | 'rh' | 'lh'
@@ -1357,6 +1357,7 @@ function setMode(m){
     : 'ばんそうの <ruby>和音<rt>わおん</rt></ruby>も、音の ながさも、じぶんで えらべるよ。';
   document.getElementById('lenRow').style.display = (m === 'jikkuri') ? 'flex' : 'none';
   if(m === 'kantan'){ state.noteLen = 1; syncLenRow(); }
+  syncFitLockBtn();
 }
 document.getElementById('modeKantan').addEventListener('click', function(){ setMode('kantan'); });
 document.getElementById('modeJikkuri').addEventListener('click', function(){ setMode('jikkuri'); });
@@ -1621,9 +1622,13 @@ function isFitRow(col, r){
   var pc = ((m.scale[7 - r] % 12) + 12) % 12;
   return ch.notes.some(function(x){ return ((x % 12) + 12) % 12 === pc; });
 }
-// 「ひかる 音だけ」の ときに 置けない マスか どうか（1・3ぱくめだけ しぼる）
+// 光らせて しぼる 拍か どうか（かんたんは 1・3ぱくめ、じっくりは 1ぱくめ）
+function isGuideBeat(col){
+  return col % (state.mode === 'jikkuri' ? 4 : 2) === 0;
+}
+// 「ひかる 音だけ」の ときに 置けない マスか どうか
 function isLockedCell(col, r){
-  return state.fitLock && col % 2 === 0 && !isFitRow(col, r);
+  return state.fitLock && isGuideBeat(col) && !isFitRow(col, r);
 }
 
 function renderMelody(){
@@ -1689,7 +1694,7 @@ function renderMelody(){
         if(!nextIsTail) cls += ' tailEnd';
       }
       var empty = !st && !isRest;
-      var fit = isFitRow(col, r);
+      var fit = isGuideBeat(col) && isFitRow(col, r);
       if(empty && fit) cls += ' fit';
       if(empty && isLockedCell(col, r)) cls += ' locked';
       if(isRest && r === 4) inner = '<span class="moon">🌙</span>';
@@ -1793,12 +1798,17 @@ document.querySelectorAll('.lenRow button').forEach(function(b){
 });
 
 /* ---- ひかる 音だけ ---- */
+function syncFitLockBtn(){
+  var b = document.getElementById('fitLockBtn');
+  var beats = (state.mode === 'jikkuri') ? '1ぱくめ' : '1・3ぱくめ';
+  b.classList.toggle('on', state.fitLock);
+  b.setAttribute('aria-pressed', state.fitLock ? 'true' : 'false');
+  b.textContent = state.fitLock ? '✨ ひかる 音だけ（' + beats + '）' : '✨ ひかる 音だけに する';
+  b.style.background = state.fitLock ? '#FFE9A8' : '';
+}
 document.getElementById('fitLockBtn').addEventListener('click', function(){
   state.fitLock = !state.fitLock;
-  this.classList.toggle('on', state.fitLock);
-  this.setAttribute('aria-pressed', state.fitLock ? 'true' : 'false');
-  this.textContent = state.fitLock ? '✨ ひかる 音だけ（1・3ぱくめ）' : '✨ ひかる 音だけに する';
-  this.style.background = state.fitLock ? '#FFE9A8' : '';
+  syncFitLockBtn();
   renderMelody();
 });
 
@@ -1873,7 +1883,7 @@ function autoMelody(){
       var beat = bar * 4 + pat[pi];
       if(beat >= 16) continue;
       var row;
-      if(pat[pi] === 3 || (state.fitLock && beat % 2 === 0) || Math.random() < 0.55){
+      if(pat[pi] === 3 || (state.fitLock && isGuideBeat(beat)) || Math.random() < 0.55){
         row = goodRows[Math.floor(Math.random() * Math.min(3, goodRows.length))];
       } else {
         row = Math.floor(Math.random() * 8);
