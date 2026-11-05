@@ -19,7 +19,7 @@
 
 - パソコン: `index.html` をダブルクリックして、ブラウザで開きます。Mac の Chrome で、ダブルクリックと同じ開き方（file://）で最後まで動くことを確かめました。Safari と Edge では確かめていません。
 - 「mp3で ほぞん」は、Linux の Chrome（画面を出さない動かし方）で、file:// で開いて確かめました。Mac の Chrome、Safari、Edge、iPad・iPhone では確かめていません。
-- iPad・iPhone: ファイルアプリで `index.html` を押すと、中身を見るだけの画面（クイックルック）で開くため、このページは動かない見込みです（実機では確かめていません）。iPad で使うには、ページをWebに置いて Safari で開く必要があります。Webに置く（公開する）かどうかは、本人の確認を取ってから決めます。
+- iPad・iPhone: ファイルアプリで `index.html` を押すと、中身を見るだけの画面（クイックルック）で開くため、このページは動かない見込みです（実機では確かめていません）。iPad で使う時は、下の「公開について」の URL を Safari で開きます（Safari での動作はまだ確かめていません）。
 - iPhone・iPad の Safari では、消音モードの間はページの音が鳴らないことがあります。音が出ない時は消音モードを切ってください。
 - 音は、最初にボタンを押した時から鳴ります（ブラウザの決まりで、押す前は鳴らせません）。
 
@@ -61,6 +61,7 @@
 
 - `index.html`: ページ本体（これ1つで動きます）
 - `README.md`: このファイル
+- `.nojekyll`: GitHub Pages で公開するための空のファイル
 - `third_party/`: mp3 に変換する部分（lamejs）のライセンスの文。`lamejs-LICENSE.txt` は lamejs に付いている案内文、`LGPL-3.0.txt` と `GPL-3.0.txt` はライセンスの全文です
 
 ### ライセンス（mp3 に変換する部分）
@@ -70,8 +71,12 @@ mp3 への変換には lamejs 1.2.1（LAME の JavaScript 移植）を使って�
 - 配布元: https://github.com/zhuker/lamejs
 - LAME 本体: http://lame.sourceforge.net/
 
-index.html を1つ開くだけで動く形にするため、lamejs は別ファイルに分けず、無改変のまま index.html の中に埋め込んでいます。lamejs の案内文は別ファイルで結合する形を勧めているため、Webで公開する時は、この埋め込みのままでよいか、別ファイルに分けるかを決めてください。
+index.html を1つ開くだけで動く形にするため、lamejs は別ファイルに分けず、無改変のまま index.html の中に埋め込んでいます。lamejs の案内文は別ファイルで結合する形を勧めていますが、1ファイルで動く形を保つため、公開版も埋め込みのままにしています。
 
 ### 公開について
 
-GitHub には、まだ公開していません。このフォルダで git の記録（コミット）をしただけです。GitHub へ送る（push）・公開する場合は、本人の確認を取ってから行います。
+GitHub Pages で公開しています。URL を知っている人は誰でも開けます。
+
+https://ngmt4amtk-web.github.io/ongaku-de-asonde-kids/
+
+ページを開く時だけ GitHub Pages から `index.html` を受け取ります。そのあとの通信はしません。
